@@ -1,6 +1,6 @@
 {
   "name": "pi-ollama-cloud-usage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pi extension that shows Ollama Cloud quota usage in the status line",
   "keywords": [
     "pi-package",
