@@ -30,6 +30,14 @@ The extension reuses the Ollama Cloud API key already configured for the `ollama
 
 Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys).
 
+## Dependencies
+
+Requires the [pi-ollama-cloud](https://pi.dev/packages/pi-ollama-cloud) package to be installed (it registers the `ollama-cloud` provider and stores the API key this extension reads):
+
+```bash
+pi install npm:pi-ollama-cloud
+```
+
 ## Commands
 
 Status is **on by default** for active `ollama-cloud` models.
