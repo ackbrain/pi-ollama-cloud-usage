@@ -1,0 +1,29 @@
+{
+  "activity": {
+    "cost": "0.00000",
+    "period": {
+      "type": "last_4_weeks",
+      "starting_at": "2026-07-06T00:00:00Z",
+      "ending_at": "2026-08-01T10:22:19.439637953Z"
+    },
+    "models": []
+  },
+  "limits": {
+    "session": {
+      "usage": 0.98,
+      "models": [
+        { "name": "glm-5.2", "request_count": 350 },
+        { "name": "deepseek-v4-flash", "request_count": 337 }
+      ]
+    },
+    "weekly": {
+      "usage": 0.983,
+      "models": [
+        { "name": "glm-5.2", "request_count": 2069 },
+        { "name": "deepseek-v4-flash", "request_count": 2572 },
+        { "name": "web search", "request_count": 5 },
+        { "name": "web fetch", "request_count": 4 }
+      ]
+    }
+  }
+}

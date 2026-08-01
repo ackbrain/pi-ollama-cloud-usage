@@ -1,0 +1,70 @@
+name: Release
+
+# Publishes to npm and creates a GitHub Release whenever a bare semver tag (e.g. 1.0.1)
+# is pushed. The tag is the single source of truth for the version: CI derives the
+# package version from it, so package.json's `version` field only needs to be bumped
+# in the same commit as the tag.
+on:
+  push:
+    tags:
+      - "[0-9]*"  # bare semver tags, e.g. 1.0.1 (no leading v)
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish & Release
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write  # npm provenance
+    steps:
+      - name: Checkout (full history + tags for git-cliff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # npm 11+ required for trusted publishing (no-token OIDC)
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Set version from tag
+        # Idempotent: write the tag's version into package.json even if it already matches
+        # (npm version errors when the version is unchanged).
+        run: node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.env.GITHUB_REF_NAME;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Generate release notes (git-cliff)
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGES.md
+
+      - name: Publish to npm (trusted publishing via GitHub OIDC)
+        run: npm publish --provenance --access public
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.cliff.outputs.content }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
