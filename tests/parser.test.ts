@@ -8,6 +8,7 @@ import {
   usedPercent,
 } from "../extensions/usage";
 import usageFixture from "./fixtures/usage.json";
+import usageBucketsFixture from "./fixtures/usage-buckets.json";
 
 describe("parseUsage", () => {
   it("parses the real /api/usage payload", () => {
@@ -20,6 +21,36 @@ describe("parseUsage", () => {
     expect(usage.session.models).toHaveLength(2);
     expect(usage.session.models[0]).toEqual({ name: "glm-5.2", requestCount: 350 });
     expect(usage.weekly.models).toHaveLength(4);
+  });
+
+  it("parses the day-bucket API shape (2026-10-08)", () => {
+    const nowMs = Date.parse("2026-10-07T12:00:00Z");
+    const usage = parseUsage(usageBucketsFixture, nowMs);
+    expect(usedPercent(usage.session)).toBeUndefined();
+    expect(usedPercent(usage.weekly)).toBeUndefined();
+    expect(usage.weeklyRequestCount).toBe(1988);
+    // Today's bucket has 1026 requests; 12h elapsed, 5h overlap -> 1026 * 5/12 = 427.5 -> 428.
+    expect(usage.sessionRequestCount).toBe(428);
+  });
+
+  it("pro-rates buckets that span the last 5h", () => {
+    const nowMs = Date.parse("2026-10-07T04:00:00Z");
+    const usage = parseUsage(usageBucketsFixture, nowMs);
+    // Window 2026-10-06T23:00 -> 2026-10-07T04:00 spans two day buckets:
+    //   previous day: 1h overlap out of 24h -> round(500 * 1/24) = 21
+    //   current day:  4h elapsed, 4h overlap -> 1026
+    expect(usage.sessionRequestCount).toBe(1047);
+  });
+
+  it("falls back to the old limits shape when both are present", () => {
+    const nowMs = Date.parse("2026-10-07T12:00:00Z");
+    const usage = parseUsage({
+      ...usageBucketsFixture,
+      limits: { session: { usage: 0.5 }, weekly: { usage: 0.75 } },
+    }, nowMs);
+    expect(usedPercent(usage.session)).toBe(50);
+    expect(usedPercent(usage.weekly)).toBe(75);
+    expect(usage.weeklyRequestCount).toBe(1988);
   });
 
   it("treats usage as a fraction (0.98 = 98%)", () => {
@@ -66,6 +97,12 @@ describe("renderUsageStatus", () => {
   it("shows only the reported window", () => {
     const usage = parseUsage({ limits: { session: { usage: 0.5 } } });
     expect(renderUsageStatus(usage)).toBe("Ollama 5h:50%");
+  });
+
+  it("shows request counts when the API only reports buckets", () => {
+    const nowMs = Date.parse("2026-10-07T12:00:00Z");
+    const usage = parseUsage(usageBucketsFixture, nowMs);
+    expect(renderUsageStatus(usage)).toBe("Ollama ~428 req 5h / 1988 wk");
   });
 
   it("falls back to cost when no windows are reported", () => {

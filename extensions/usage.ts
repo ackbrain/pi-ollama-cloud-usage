@@ -43,6 +43,10 @@ export interface UsageSnapshot {
   period?: UsagePeriod;
   session: UsageWindow;
   weekly: UsageWindow;
+  /** Request count in the rolling 5-hour window, when the API only reports counts. */
+  sessionRequestCount?: number;
+  /** Request count in the weekly (7-day) window, when the API only reports counts. */
+  weeklyRequestCount?: number;
 }
 
 type UsageErrorCode =
@@ -208,7 +212,84 @@ function usagePeriod(value: unknown): UsagePeriod | undefined {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-export function parseUsage(value: unknown): UsageSnapshot {
+const SESSION_WINDOW_MS = 5 * 60 * 60 * 1000;
+
+interface UsageBucket {
+  fromMs: number;
+  untilMs: number;
+  requestCount: number;
+}
+
+function usageBucket(value: unknown): UsageBucket | undefined {
+  const obj = objectValue(value);
+  if (!obj) return undefined;
+  const from = boundedTimestamp(obj.from);
+  const until = boundedTimestamp(obj.until);
+  const requestCount = boundedRequestCount(obj.request_count);
+  if (from === undefined || until === undefined || requestCount === undefined) return undefined;
+  const fromMs = Date.parse(from);
+  const untilMs = Date.parse(until);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(untilMs) || untilMs <= fromMs) return undefined;
+  return { fromMs, untilMs, requestCount };
+}
+
+/**
+ * The newer Ollama usage API (observed 2026-10-08) returns a 7-day window
+ * with day-granularity buckets, e.g.:
+ *   { range:"7d", granularity:"day", totals:{ request_count:1988 },
+ *     buckets:[{ from, until, request_count }, ...] }
+ * It no longer includes session/weekly usage percentages or cost. We map
+ * those counts back onto the same footer semantics as honestly as possible:
+ *   - weeklyRequestCount = totals.request_count (the full 7-day window)
+ *   - sessionRequestCount = sum of bucket counts whose window intersects the
+ *     last 5 hours. Because the API currently offers only day granularity, this
+ *     is normally a single bucket (today). We pro-rate today's bucket by the
+ *     fraction of the bucket's elapsed time that falls inside the last 5h,
+ *     so the count is not inflated by a whole day's traffic when most of the
+ *     day is still ahead.
+ */
+function parseBucketUsage(root: Record<string, unknown>, nowMs: number): {
+  sessionRequestCount?: number;
+  weeklyRequestCount?: number;
+} {
+  const totals = objectValue(root.totals);
+  const weeklyRequestCount = totals
+    ? boundedRequestCount(totals.request_count)
+    : undefined;
+
+  const rawBuckets = root.buckets;
+  if (!Array.isArray(rawBuckets) || rawBuckets.length === 0) {
+    return { weeklyRequestCount };
+  }
+  const buckets = rawBuckets
+    .map(usageBucket)
+    .filter((bucket): bucket is UsageBucket => bucket !== undefined)
+    .sort((a, b) => a.fromMs - b.fromMs);
+
+  const sessionStartMs = nowMs - SESSION_WINDOW_MS;
+  let sessionRequestCount = 0;
+  for (const bucket of buckets) {
+    if (bucket.untilMs <= sessionStartMs || bucket.fromMs >= nowMs) continue;
+    const overlapStartMs = Math.max(bucket.fromMs, sessionStartMs);
+    const overlapEndMs = Math.min(bucket.untilMs, nowMs);
+    const overlapMs = overlapEndMs - overlapStartMs;
+    if (overlapMs <= 0) continue;
+    // Day granularity: the bucket spans 24h, but only the portion elapsed up
+    // to `nowMs` can have accumulated requests. Estimate the share that fell
+    // inside the last 5h by assuming requests are uniformly distributed over
+    // the elapsed part of the bucket. When the bucket is newer than 5h, the
+    // whole bucket so far is inside the window, so this returns the full count.
+    const elapsedMs = Math.min(bucket.untilMs, nowMs) - bucket.fromMs;
+    sessionRequestCount += Math.round(bucket.requestCount * (overlapMs / elapsedMs));
+  }
+
+  return {
+    sessionRequestCount: sessionRequestCount > 0 ? sessionRequestCount : undefined,
+    weeklyRequestCount,
+  };
+}
+
+export function parseUsage(value: unknown, nowMs = Date.now()): UsageSnapshot {
   assertBoundedJson(value);
   const root = objectValue(value);
   if (!root) throw new UsageError("invalid", "Ollama usage returned an invalid response.");
@@ -226,15 +307,24 @@ export function parseUsage(value: unknown): UsageSnapshot {
   }
 
   const limits = objectValue(root.limits);
-  if (!limits) {
-    // limits may be missing entirely (e.g. API drift); windows stay empty.
-    return snapshot;
+  if (limits) {
+    const session = usageWindow(limits.session);
+    const weekly = usageWindow(limits.weekly);
+    if (session) snapshot.session = session;
+    if (weekly) snapshot.weekly = weekly;
   }
 
-  const session = usageWindow(limits.session);
-  const weekly = usageWindow(limits.weekly);
-  if (session) snapshot.session = session;
-  if (weekly) snapshot.weekly = weekly;
+  // The newer bucket-based response shape (2026-10-08) carries counts instead
+  // of usage fractions. Parse it as a fallback / supplement when limits are
+  // absent or empty, so the footer stays useful even after API drift.
+  const totals = objectValue(root.totals);
+  const buckets = root.buckets;
+  if (totals || Array.isArray(buckets)) {
+    const { sessionRequestCount, weeklyRequestCount } = parseBucketUsage(root, nowMs);
+    if (sessionRequestCount !== undefined) snapshot.sessionRequestCount = sessionRequestCount;
+    if (weeklyRequestCount !== undefined) snapshot.weeklyRequestCount = weeklyRequestCount;
+  }
+
   return snapshot;
 }
 
@@ -428,6 +518,8 @@ export function renderUsage(usage: UsageSnapshot): string {
     if (sessionRemaining !== undefined) {
       lines.push(`Session remaining: ${formatPercent(sessionRemaining / 100)}`);
     }
+  } else if (usage.sessionRequestCount !== undefined) {
+    lines.push(`Session window (5h, approx.): ~${usage.sessionRequestCount} requests`);
   }
   lines.push(...formatModelBreakdown(usage.session));
 
@@ -438,6 +530,8 @@ export function renderUsage(usage: UsageSnapshot): string {
     if (weeklyRemaining !== undefined) {
       lines.push(`Weekly remaining: ${formatPercent(weeklyRemaining / 100)}`);
     }
+  } else if (usage.weeklyRequestCount !== undefined) {
+    lines.push(`Weekly window (7d): ${usage.weeklyRequestCount} requests`);
   }
   lines.push(...formatModelBreakdown(usage.weekly));
 
@@ -465,6 +559,15 @@ export function renderUsageStatus(usage: UsageSnapshot): string {
     parts.push(`Wk:${formatPercent(weeklyUsed / 100)}`);
   }
   if (parts.length === 0) {
+    // The newer bucket-based API reports request counts, not quota percentages.
+    // Show counts rather than the unhelpful "Ollama ok" fallback.
+    const sessionCount = usage.sessionRequestCount;
+    const weeklyCount = usage.weeklyRequestCount;
+    if (sessionCount !== undefined || weeklyCount !== undefined) {
+      const sessionPart = sessionCount !== undefined ? `~${sessionCount} req 5h` : "5h:—";
+      const weeklyPart = weeklyCount !== undefined ? `${weeklyCount} wk` : "Wk:—";
+      return `Ollama ${sessionPart} / ${weeklyPart}`;
+    }
     if (usage.cost !== undefined) {
       return `Ollama $${usage.cost}`;
     }

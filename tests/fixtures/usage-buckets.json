@@ -1,0 +1,47 @@
+{
+  "range": "7d",
+  "scope": "self",
+  "granularity": "day",
+  "from": "2026-10-01T00:00:00Z",
+  "until": "2026-10-08T00:00:00Z",
+  "totals": {
+    "request_count": 1988
+  },
+  "buckets": [
+    {
+      "from": "2026-10-01T00:00:00Z",
+      "until": "2026-10-02T00:00:00Z",
+      "request_count": 2
+    },
+    {
+      "from": "2026-10-02T00:00:00Z",
+      "until": "2026-10-03T00:00:00Z",
+      "request_count": 10
+    },
+    {
+      "from": "2026-10-03T00:00:00Z",
+      "until": "2026-10-04T00:00:00Z",
+      "request_count": 50
+    },
+    {
+      "from": "2026-10-04T00:00:00Z",
+      "until": "2026-10-05T00:00:00Z",
+      "request_count": 100
+    },
+    {
+      "from": "2026-10-05T00:00:00Z",
+      "until": "2026-10-06T00:00:00Z",
+      "request_count": 300
+    },
+    {
+      "from": "2026-10-06T00:00:00Z",
+      "until": "2026-10-07T00:00:00Z",
+      "request_count": 500
+    },
+    {
+      "from": "2026-10-07T00:00:00Z",
+      "until": "2026-10-08T00:00:00Z",
+      "request_count": 1026
+    }
+  ]
+}
