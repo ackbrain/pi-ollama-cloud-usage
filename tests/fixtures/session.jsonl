@@ -1,0 +1,8 @@
+{"type":"session","version":3,"id":"fixture","timestamp":"2026-10-01T00:00:00.000Z","cwd":"/tmp"}
+{"type":"message","id":"m0","timestamp":"2026-10-01T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
+{"type":"message","id":"m5h_in","timestamp":"2026-10-07T03:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"a"}],"usage":{"input":1000,"output":100,"totalTokens":1100,"cost":{"input":0,"output":0,"total":0}}}}
+{"type":"message","id":"m5h_in2","timestamp":"2026-10-07T04:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"b"}],"usage":{"input":2000,"output":200,"totalTokens":2200,"cost":{"input":0,"output":0,"total":0}}}}
+{"type":"message","id":"m5h_out","timestamp":"2026-10-07T02:30:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"c"}],"usage":{"input":3000,"output":300,"totalTokens":3300,"cost":{"input":0,"output":0,"total":0}}}}
+{"type":"message","id":"m7d_in","timestamp":"2026-10-05T08:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"d"}],"usage":{"input":4000,"output":400,"totalTokens":4400,"cost":{"input":0,"output":0,"total":0}}}}
+{"type":"message","id":"m7d_out","timestamp":"2026-09-30T07:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"e"}],"usage":{"input":5000,"output":500,"totalTokens":5500,"cost":{"input":0,"output":0,"total":0}}}}
+{"type":"message","id":"m_cost","timestamp":"2026-10-07T05:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"f"}],"usage":{"input":6000,"output":600,"totalTokens":6600,"cost":{"input":0.01,"output":0.02,"cacheRead":0,"cacheWrite":0,"total":0.03}}}}

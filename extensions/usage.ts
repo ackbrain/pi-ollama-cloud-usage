@@ -20,6 +20,8 @@ import {
   USAGE_TIMEOUT_MS,
   USER_AGENT,
 } from "./constants";
+import { calibrateCeilings, readCeilings, type TokenCeilings } from "./ceiling";
+import { formatTokenCount, readLocalTokenUsage, type LocalUsage } from "./local-usage";
 
 export interface UsageModelBreakdown {
   name?: string;
@@ -47,6 +49,10 @@ export interface UsageSnapshot {
   sessionRequestCount?: number;
   /** Request count in the weekly (7-day) window, when the API only reports counts. */
   weeklyRequestCount?: number;
+  /** Locally-accounted token and cost totals from Pi session files. */
+  local?: LocalUsage;
+  /** Optional calibrated/configured token ceilings for percentage display. */
+  ceilings?: TokenCeilings;
 }
 
 type UsageErrorCode =
@@ -507,6 +513,18 @@ export function formatReadableLocal(iso: string): string | undefined {
   });
 }
 
+function formatCost(value: number): string {
+  return `$${value.toFixed(4).replace(/\.?0+$/, "")}`;
+}
+
+function localTokenLine(local: LocalUsage, window: "5h" | "7d"): string {
+  const tokens = window === "5h" ? local.session5hTokens : local.weekly7dTokens;
+  const cost = window === "5h" ? local.session5hCost : local.weekly7dCost;
+  let line = `~${formatTokenCount(tokens)} tokens`;
+  if (cost > 0) line += ` (${formatCost(cost)})`;
+  return line;
+}
+
 /** Full multi-line report for `/ollama-usage`. */
 export function renderUsage(usage: UsageSnapshot): string {
   const lines = ["Ollama Cloud usage:"];
@@ -518,6 +536,8 @@ export function renderUsage(usage: UsageSnapshot): string {
     if (sessionRemaining !== undefined) {
       lines.push(`Session remaining: ${formatPercent(sessionRemaining / 100)}`);
     }
+  } else if (usage.local) {
+    lines.push(`Session window (5h): ${localTokenLine(usage.local, "5h")}`);
   } else if (usage.sessionRequestCount !== undefined) {
     lines.push(`Session window (5h, approx.): ~${usage.sessionRequestCount} requests`);
   }
@@ -530,6 +550,8 @@ export function renderUsage(usage: UsageSnapshot): string {
     if (weeklyRemaining !== undefined) {
       lines.push(`Weekly remaining: ${formatPercent(weeklyRemaining / 100)}`);
     }
+  } else if (usage.local) {
+    lines.push(`Weekly window (7d): ${localTokenLine(usage.local, "7d")}`);
   } else if (usage.weeklyRequestCount !== undefined) {
     lines.push(`Weekly window (7d): ${usage.weeklyRequestCount} requests`);
   }
@@ -549,6 +571,41 @@ export function renderUsage(usage: UsageSnapshot): string {
 
 /** Compact footer status: `Ollama 5h:98% Wk:98.3%`. */
 export function renderUsageStatus(usage: UsageSnapshot): string {
+  const local = usage.local;
+  const ceilings = usage.ceilings;
+
+  if (
+    local
+    && (
+      local.session5hTokens > 0
+      || local.weekly7dTokens > 0
+      || ceilings?.session !== undefined
+      || ceilings?.weekly !== undefined
+    )
+  ) {
+    const hasSessionCeiling = ceilings?.session !== undefined && ceilings.session > 0;
+    const hasWeeklyCeiling = ceilings?.weekly !== undefined && ceilings.weekly > 0;
+
+    if (hasSessionCeiling || hasWeeklyCeiling) {
+      const parts: string[] = [];
+      if (hasSessionCeiling) {
+        parts.push(`5h:${formatPercent(local.session5hTokens / ceilings.session!)}`);
+      }
+      if (hasWeeklyCeiling) {
+        parts.push(`Wk:${formatPercent(local.weekly7dTokens / ceilings.weekly!)}`);
+      }
+      return `Ollama ${parts.join(" ")}`;
+    }
+
+    const sessionPart = local.session5hTokens > 0
+      ? `5h:~${formatTokenCount(local.session5hTokens)} tok`
+      : "5h:—";
+    const weeklyPart = local.weekly7dTokens > 0
+      ? `Wk:~${formatTokenCount(local.weekly7dTokens)} tok`
+      : "Wk:—";
+    return `Ollama ${sessionPart} / ${weeklyPart}`;
+  }
+
   const parts: string[] = [];
   const sessionUsed = usedPercent(usage.session);
   const weeklyUsed = usedPercent(usage.weekly);
@@ -558,22 +615,24 @@ export function renderUsageStatus(usage: UsageSnapshot): string {
   if (weeklyUsed !== undefined) {
     parts.push(`Wk:${formatPercent(weeklyUsed / 100)}`);
   }
-  if (parts.length === 0) {
-    // The newer bucket-based API reports request counts, not quota percentages.
-    // Show counts rather than the unhelpful "Ollama ok" fallback.
-    const sessionCount = usage.sessionRequestCount;
-    const weeklyCount = usage.weeklyRequestCount;
-    if (sessionCount !== undefined || weeklyCount !== undefined) {
-      const sessionPart = sessionCount !== undefined ? `~${sessionCount} req 5h` : "5h:—";
-      const weeklyPart = weeklyCount !== undefined ? `${weeklyCount} wk` : "Wk:—";
-      return `Ollama ${sessionPart} / ${weeklyPart}`;
-    }
-    if (usage.cost !== undefined) {
-      return `Ollama $${usage.cost}`;
-    }
-    return "Ollama ok";
+  if (parts.length > 0) {
+    return `Ollama ${parts.join(" ")}`;
   }
-  return `Ollama ${parts.join(" ")}`;
+
+  // The newer bucket-based API reports request counts, not quota percentages.
+  // Keep counts available, but prefer the local token accounting above.
+  const sessionCount = usage.sessionRequestCount;
+  const weeklyCount = usage.weeklyRequestCount;
+  if (sessionCount !== undefined || weeklyCount !== undefined) {
+    const sessionPart = sessionCount !== undefined ? `~${sessionCount} req 5h` : "5h:—";
+    const weeklyPart = weeklyCount !== undefined ? `${weeklyCount} wk` : "Wk:—";
+    return `Ollama ${sessionPart} / ${weeklyPart}`;
+  }
+
+  if (usage.cost !== undefined) {
+    return `Ollama $${usage.cost}`;
+  }
+  return "Ollama ok";
 }
 
 export interface UsageFeature {
@@ -585,6 +644,9 @@ export interface UsageFeature {
 interface UsageDependencies {
   resolveCredential: typeof resolveOllamaCredential;
   fetchUsage: typeof fetchUsage;
+  readLocalTokenUsage: typeof readLocalTokenUsage;
+  readCeilings: typeof readCeilings;
+  calibrateCeilings: typeof calibrateCeilings;
   now: () => number;
   minimumRefreshMs: number;
   /** When true, status auto-enables on Ollama Cloud models (package default). */
@@ -605,6 +667,9 @@ export function registerUsage(
   const dependencies: UsageDependencies = {
     resolveCredential: overrides.resolveCredential ?? resolveOllamaCredential,
     fetchUsage: overrides.fetchUsage ?? fetchUsage,
+    readLocalTokenUsage: overrides.readLocalTokenUsage ?? readLocalTokenUsage,
+    readCeilings: overrides.readCeilings ?? readCeilings,
+    calibrateCeilings: overrides.calibrateCeilings ?? calibrateCeilings,
     now: overrides.now ?? Date.now,
     minimumRefreshMs: overrides.minimumRefreshMs ?? USAGE_STATUS_MIN_REFRESH_MS,
     defaultStatusOn: overrides.defaultStatusOn ?? true,
@@ -658,7 +723,14 @@ export function registerUsage(
         "An Ollama Cloud API key is required. Run /login ollama-cloud or set OLLAMA_API_KEY.",
       );
     }
-    return dependencies.fetchUsage(credential, signal);
+    const [usage, local, ceilings] = await Promise.all([
+      dependencies.fetchUsage(credential, signal),
+      dependencies.readLocalTokenUsage(),
+      dependencies.readCeilings(),
+    ]);
+    usage.local = local;
+    usage.ceilings = ceilings;
+    return usage;
   };
 
   const updateStatus = async (
@@ -785,6 +857,25 @@ export function registerUsage(
       }
     },
   });
+
+  // When Pi receives a 429 from an Ollama Cloud provider request, treat the
+  // current local consumption as a calibrated ceiling. This lets the footer
+  // show percentages even when the dashboard has not yet published a fixed
+  // limit, without guessing.
+  if (typeof pi.on === "function") {
+    pi.on(
+      "after_provider_response",
+      async (event, ctx: any) => {
+        if (event.status !== 429) return;
+        if (!isOllamaCloudProvider(ctx.model?.provider)) return;
+        const local = await dependencies.readLocalTokenUsage({ force: true });
+        dependencies.calibrateCeilings(local);
+        if (statusEnabled) {
+          await updateStatus(ctx, true);
+        }
+      },
+    );
+  }
 
   return {
     reset: (ctx) => reset(ctx, false),

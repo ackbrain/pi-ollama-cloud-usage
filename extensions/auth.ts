@@ -94,7 +94,7 @@ function readJsonFile(path: string): any | undefined {
   }
 }
 
-function agentDir(): string {
+export function agentDir(): string {
   // Prefer PI_AGENT_DIR when set (tests / custom installs); otherwise ~/.pi/agent.
   const override = process.env.PI_AGENT_DIR?.trim();
   if (override) return override;

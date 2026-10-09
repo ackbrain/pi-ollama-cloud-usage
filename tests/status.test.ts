@@ -24,9 +24,20 @@ function setup(model: any = { provider: "ollama-cloud", id: "glm-5.2" }) {
   let now = 1_000;
   const resolveCredential = vi.fn(async () => ({ kind: "api-key" as const, key: "SECRET" }));
   const fetchUsage = vi.fn(async () => usage);
+  const readLocalTokenUsage = vi.fn(async () => ({
+    session5hTokens: 0,
+    weekly7dTokens: 0,
+    session5hCost: 0,
+    weekly7dCost: 0,
+  }));
+  const readCeilings = vi.fn(() => ({ session: undefined, weekly: undefined }));
+  const calibrateCeilings = vi.fn(() => undefined);
   const feature = registerUsage(harness.api, {
     resolveCredential,
     fetchUsage,
+    readLocalTokenUsage,
+    readCeilings,
+    calibrateCeilings,
     now: () => now,
     minimumRefreshMs: 60_000,
     defaultStatusOn: true,
